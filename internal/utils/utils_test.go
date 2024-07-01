@@ -2,6 +2,8 @@ package utils
 
 import (
 	"debug/gosym"
+	"fmt"
+	"maps"
 	"reflect"
 	"testing"
 	"unsafe"
@@ -64,7 +66,7 @@ func TestUglyGuess(t *testing.T) {
 }
 
 func TestPrefixToPath(t *testing.T) {
-	var escapeTests = []struct {
+	escapeTests := []struct {
 		Path    string
 		Escaped string
 	}{
@@ -91,5 +93,29 @@ func TestPrefixToPath(t *testing.T) {
 		if got != tc.Path {
 			t.Errorf("expected PrefixToPath(%s) = %s, got %s", tc.Escaped, tc.Path, got)
 		}
+	}
+}
+
+func TestMust(t *testing.T) {
+	t.Run("does not panic for nil error", func(t *testing.T) {
+		assert.NotPanics(t, func() { Must(nil) })
+	})
+
+	t.Run("panics for non-nil error", func(t *testing.T) {
+		assert.Panics(t, func() { Must(fmt.Errorf("test error")) })
+	})
+}
+
+func TestCollect(t *testing.T) {
+	args := map[string]struct{}{
+		"foo": {},
+		"bar": {},
+		"baz": {},
+	}
+	seq := maps.Keys(args)
+
+	result := Collect(seq)
+	for k := range args {
+		assert.Contains(t, result, k)
 	}
 }

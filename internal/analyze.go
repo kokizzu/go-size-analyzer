@@ -1,14 +1,18 @@
 package internal
 
 import (
+	"cmp"
 	"errors"
+	"io"
 	"log/slog"
-	"path"
+	"maps"
+	"path/filepath"
+	"slices"
 
 	"github.com/ZxillyFork/gore"
-	"golang.org/x/exp/maps"
 
 	"github.com/Zxilly/go-size-analyzer/internal/entity"
+	"github.com/Zxilly/go-size-analyzer/internal/knowninfo"
 	"github.com/Zxilly/go-size-analyzer/internal/result"
 	"github.com/Zxilly/go-size-analyzer/internal/utils"
 	"github.com/Zxilly/go-size-analyzer/internal/wrapper"
@@ -17,63 +21,114 @@ import (
 type Options struct {
 	SkipSymbol bool
 	SkipDisasm bool
+	SkipDwarf  bool
 }
 
-func Analyze(bin string, options Options) (*result.Result, error) {
-	file, err := gore.Open(bin)
+func Analyze(name string, reader io.ReaderAt, size uint64, options Options) (*result.Result, error) {
+	slog.Info("Parsing binary...")
+
+	file, err := gore.Open(reader)
 	if err != nil {
 		return nil, err
 	}
 
-	k := &KnownInfo{
-		Size:      utils.GetFileSize(file.GetFile()),
+	slog.Info("Parsed binary done")
+	slog.Info("Finding build info...")
+
+	k := &knowninfo.KnownInfo{
+		Size:      size,
 		BuildInfo: file.BuildInfo,
 
-		gore:    file,
-		wrapper: wrapper.NewWrapper(file.GetParsedFile()),
+		Gore:    file,
+		Wrapper: wrapper.NewWrapper(file.GetParsedFile()),
 	}
 	k.KnownAddr = entity.NewKnownAddr()
-	k.UpdateVersionFlag()
+	k.VersionFlag = k.UpdateVersionFlag()
 
-	k.LoadSectionMap()
+	analyzers := []entity.Analyzer{
+		entity.AnalyzerPclntab,
+	}
+
+	slog.Info("Found build info")
+
+	err = k.LoadSectionMap()
+	if err != nil {
+		return nil, err
+	}
 
 	err = k.LoadPackages()
 	if err != nil {
 		return nil, err
 	}
 
-	if !options.SkipSymbol {
-		err = k.AnalyzeSymbol()
-		if err != nil {
-			if errors.Is(err, wrapper.ErrNoSymbolTable) {
-				slog.Warn("Warning: no symbol table found, this can lead to inaccurate results")
-			} else {
-				return nil, err
-			}
-		}
+	dwarfOk := false
+	if !options.SkipDwarf {
+		slog.Info("Parsing DWARF...")
+		dwarfOk = k.TryLoadDwarf()
 	}
 
-	if !options.SkipDisasm {
-		err = k.Disasm()
-		if err != nil {
-			return nil, err
+	if !dwarfOk && !options.SkipDwarf {
+		slog.Warn("DWARF parsing failed, fallback to symbol and disasm")
+	}
+
+	if dwarfOk {
+		analyzers = append(analyzers, entity.AnalyzerDwarf)
+		slog.Info("Parsed DWARF")
+	}
+
+	// DWARF can still add new package, so we defer this
+	k.Deps.FinishLoad()
+
+	if !dwarfOk {
+		// fallback to symbol and disasm
+		if !options.SkipSymbol {
+			err = k.AnalyzeSymbol()
+			if err != nil {
+				if !errors.Is(err, wrapper.ErrNoSymbolTable) {
+					return nil, err
+				}
+				slog.Warn("No symbol table found, this can lead to inaccurate results")
+			}
+			analyzers = append(analyzers, entity.AnalyzerSymbol)
+		}
+
+		if !options.SkipDisasm {
+			err = k.Disasm()
+			if err != nil {
+				return nil, err
+			}
+			analyzers = append(analyzers, entity.AnalyzerDisasm)
 		}
 	}
 
 	// we have collected everything, now we can calculate the size
 
 	// first, merge all results to coverage
-	k.CollectCoverage()
+	err = k.CollectCoverage()
+	if err != nil {
+		return nil, err
+	}
 
 	// for sections
-	k.CalculateSectionSize()
+	err = k.CalculateSectionSize()
+	if err != nil {
+		return nil, err
+	}
+
 	// for packages
 	k.CalculatePackageSize()
 
+	sections := utils.Collect(maps.Values(k.Sects.Sections))
+	slices.SortFunc(sections, func(a, b *entity.Section) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
+	slices.Sort(analyzers)
+
 	return &result.Result{
-		Name:     path.Base(bin),
-		Size:     k.Size,
-		Packages: k.Deps.TopPkgs,
-		Sections: maps.Values(k.Sects.Sections),
+		Name:      filepath.Base(name),
+		Size:      k.Size,
+		Packages:  k.Deps.TopPkgs,
+		Sections:  sections,
+		Analyzers: analyzers,
 	}, nil
 }

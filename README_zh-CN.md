@@ -1,19 +1,36 @@
 # go-size-analyzer
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/Zxilly/go-size-analyzer)](https://goreportcard.com/report/github.com/Zxilly/go-size-analyzer)
-[![Tests](https://github.com/Zxilly/go-size-analyzer/actions/workflows/tests.yml/badge.svg)](https://github.com/Zxilly/go-size-analyzer/actions/workflows/tests.yml)
-[![codecov](https://codecov.io/github/Zxilly/go-size-analyzer/graph/badge.svg?token=Q4TDH6RFZN)](https://codecov.io/github/Zxilly/go-size-analyzer)
+[![Tests](https://github.com/Zxilly/go-size-analyzer/actions/workflows/built-tests.yml/badge.svg)](https://github.com/Zxilly/go-size-analyzer/actions/workflows/built-tests.yml)
+[![Codecov](https://img.shields.io/codecov/c/gh/Zxilly/go-size-analyzer)](https://codecov.io/github/Zxilly/go-size-analyzer)
 [![GitHub release](https://img.shields.io/github/v/release/Zxilly/go-size-analyzer)](https://github.com/Zxilly/go-size-analyzer/releases)
+[![go-recipes](https://raw.githubusercontent.com/nikolaydubina/go-recipes/main/badge.svg?raw=true)](https://github.com/nikolaydubina/go-recipes?tab=readme-ov-file#-visualise-dependencies-size-in-compiled-binaries-with-go-size-analyzer)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Zxilly/go-size-analyzer/badge)](https://scorecard.dev/viewer/?uri=github.com/Zxilly/go-size-analyzer)
 
 一个简单的工具，用于分析 Go 编译二进制文件的大小。
 
+[![Packaging status](https://repology.org/badge/vertical-allrepos/go-size-analyzer.svg)](https://repology.org/project/go-size-analyzer/versions)
+
 ## 安装
 
-从[发布页面](https://github.com/Zxilly/go-size-analyzer/releases)下载最新版本。
+### [下载最新二进制文件](https://github.com/Zxilly/go-size-analyzer/releases)
 
-或者使用以下命令安装最新版本：
+### MacOS / Linux 通过 Homebrew 安装：
 
-```bash
+使用 [Homebrew](https://brew.sh/)
+```
+brew install go-size-analyzer
+```
+
+### Windows：
+
+使用 [scoop](https://scoop.sh/)
+```
+scoop install go-size-analyzer
+```
+
+### Go 安装：
+```
 go install github.com/Zxilly/go-size-analyzer/cmd/gsa@latest
 ```
 
@@ -29,23 +46,27 @@ $ gsa --web golang-compiled-binary
 
 将在 8080 端口启动一个 web 服务器，您可以在浏览器中查看结果。
 
+或者您可以在浏览器中使用 WASM 版本：[GSA Treemap](https://gsa.zxilly.dev)
+
+> [!NOTE]
+> 由于浏览器的限制，wasm 版本比原生版本慢得多。
+> 通常分析相同二进制文件需要 10 倍的时间。
+> 
+> 仅建议用于分析小型应用程序（大小小于 30 MB）
+
 网页将如下所示：
 
-![image](https://github.com/Zxilly/go-size-analyzer/assets/31370133/78bb8105-fc5a-4852-8704-8c2fac3bf475)
+![image](https://github.com/Zxilly/go-size-analyzer/assets/31370133/e69583ce-b189-4a0d-b108-c3b7d5c33a82)
 
 您可以点击以展开包以查看详细信息。
 
-#### 终端用户界面（实验性）
+#### 终端用户界面
 
 ```bash
 $ gsa --tui golang-compiled-binary
 ```
 
-![image](https://github.com/Zxilly/go-size-analyzer/assets/31370133/04556f54-7ebb-42b8-ac57-91a17887a44e)
-
->[!NOTE]
-> 在 Windows 上可能会出现 UI 显示问题，这是由于依赖库引起的。
-> 如果遇到问题，请尝试在 Linux/WSL 上运行。
+![demo](https://github.com/Zxilly/go-size-analyzer/assets/31370133/9f38989e-ab9f-4098-a939-26ca23fef407)
 
 #### 文本模式
 
@@ -109,7 +130,7 @@ gsa cockroach-darwin-amd64 -f svg -o data.svg --hide-sections
 ```bash
 Usage: gsa <file> [flags]
 
-A tool for analysing the size of dependencies in compiled Golang binaries,
+A tool for analyzing the size of dependencies in compiled Golang binaries,
 providing insight into their impact on the final build.
 
 Arguments:
@@ -121,6 +142,7 @@ Flags:
   -f, --format="text"    Output format, possible values: text,json,html,svg
       --no-disasm        Skip disassembly pass
       --no-symbol        Skip symbol pass
+      --no-dwarf         Skip dwarf pass
   -o, --output=STRING    Write to file
       --version          Show version
 
@@ -140,7 +162,7 @@ Svg output options
   --padding-box=4      Padding between box border and content
   --padding-root=32    Padding around root content
 
-Web explorer options
+Web interface options
   --web               use web interface to explore the details
   --listen=":8080"    listen address
   --open              Open browser
@@ -156,11 +178,12 @@ Terminal interface options
 ## TODO
 
 - [ ] 添加更多用于反汇编二进制文件的模式
-- [ ] 从 dwarf 段提取信息
+- [x] 从 DWARF 段提取信息
 - [x] 计算符号本身的大小到包中
 - [ ] 添加其他图表，如火焰图、饼图等
 - [ ] 支持 demangle cgo 中的 C++/Rust 符号
 - [x] 添加 TUI 模式以探索
+- [x] 编译为 wasm，创建一个在浏览器中分析二进制文件的用户界面
 
 ## Contribution
 

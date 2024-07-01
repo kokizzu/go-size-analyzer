@@ -1,9 +1,15 @@
+//go:build !wasm
+
 package main
 
 import (
+	"log/slog"
+
 	"github.com/alecthomas/kong"
 
 	gsv "github.com/Zxilly/go-size-analyzer"
+	"github.com/Zxilly/go-size-analyzer/internal/utils"
+	"github.com/Zxilly/go-size-analyzer/internal/webui"
 )
 
 var Options struct {
@@ -12,6 +18,7 @@ var Options struct {
 
 	NoDisasm bool `help:"Skip disassembly pass"`
 	NoSymbol bool `help:"Skip symbol pass"`
+	NoDwarf  bool `help:"Skip dwarf pass"`
 
 	HideSections bool `help:"Hide sections" group:"text"`
 	HideMain     bool `help:"Hide main package" group:"text"`
@@ -26,9 +33,10 @@ var Options struct {
 	PaddingBox  int `help:"Padding between box border and content" default:"4" group:"svg"`
 	PaddingRoot int `help:"Padding around root content" default:"32" group:"svg"`
 
-	Web    bool   `long:"web" help:"use web interface to explore the details" group:"web"`
-	Listen string `long:"listen" help:"listen address" default:":8080" group:"web"`
-	Open   bool   `long:"open" help:"Open browser" group:"web"`
+	Web         bool                  `long:"web" help:"use web interface to explore the details" group:"web"`
+	Listen      string                `long:"listen" help:"listen address" default:":8080" group:"web"`
+	Open        bool                  `long:"open" help:"Open browser" group:"web"`
+	UpdateCache webui.UpdateCacheFlag `long:"update-cache" help:"Update the cache file for the web UI" group:"web"`
 
 	Tui bool `long:"tui" help:"use terminal interface to explore the details" group:"tui"`
 
@@ -59,7 +67,7 @@ func init() {
 			},
 			{
 				Key:   "web",
-				Title: "Web explorer options",
+				Title: "Web interface options",
 			},
 			{
 				Key:   "svg",
@@ -73,5 +81,22 @@ func init() {
 		kong.Vars{
 			"version": gsv.SprintVersion(),
 		},
+		kong.PostBuild(func(k *kong.Kong) error {
+			_, showCache := any(webui.UpdateCacheFlag(true)).(interface {
+				BeforeReset(*kong.Kong, kong.Vars) error
+			})
+			for _, f := range k.Model.Flags {
+				if f.Name == "update-cache" {
+					f.Hidden = !showCache
+				}
+			}
+			return nil
+		}),
 	)
+
+	if Options.Verbose {
+		utils.InitLogger(slog.LevelDebug)
+	} else {
+		utils.InitLogger(slog.LevelWarn)
+	}
 }

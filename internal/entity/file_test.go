@@ -3,11 +3,12 @@ package entity_test
 import (
 	"testing"
 
+	"github.com/go-json-experiment/json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Zxilly/go-size-analyzer/internal/entity"
-	"github.com/Zxilly/go-size-analyzer/internal/global"
+	"github.com/Zxilly/go-size-analyzer/internal/entity/marshaler"
 )
 
 func TestFile_MarshalJSON(t *testing.T) {
@@ -21,25 +22,16 @@ func TestFile_MarshalJSON(t *testing.T) {
 		},
 	}
 
-	t.Run("HideDetail is true", func(t *testing.T) {
-		// Set HideDetail to true
-		global.HideDetail = true
-
-		// Call MarshalJSON
-		data, err := file.MarshalJSON()
-
+	t.Run("Compact mode", func(t *testing.T) {
+		data, err := json.Marshal(file, json.WithMarshalers(marshaler.GetFileCompactMarshaler()))
 		// Verify the result
 		require.NoError(t, err)
 		expected := `{"file_path":"/path/to/file","pcln_size":0,"size":60}`
 		assert.JSONEq(t, expected, string(data))
 	})
 
-	t.Run("HideDetail is false", func(t *testing.T) {
-		// Set HideDetail to false
-		global.HideDetail = false
-
-		// Call MarshalJSON
-		data, err := file.MarshalJSON()
+	t.Run("Full mode", func(t *testing.T) {
+		data, err := json.Marshal(file)
 
 		// Verify the result
 		require.NoError(t, err)
@@ -60,7 +52,7 @@ func TestFile_MarshalJSON(t *testing.T) {
                 "pcln": 0,
                 "header": 0,
                 "funcdata": 0,
-                "pcdata": null
+                "pcdata": {}
             }
         },
         {
@@ -76,7 +68,7 @@ func TestFile_MarshalJSON(t *testing.T) {
                 "pcln": 0,
                 "header": 0,
                 "funcdata": 0,
-                "pcdata": null
+                "pcdata": {}
             }
         },
         {
@@ -92,7 +84,7 @@ func TestFile_MarshalJSON(t *testing.T) {
                 "pcln": 0,
                 "header": 0,
                 "funcdata": 0,
-                "pcdata": null
+                "pcdata": {}
             }
         }
     ]

@@ -6,14 +6,18 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"time"
 )
 
+var startTime time.Time
+
 func InitLogger(level slog.Level) {
+	startTime = time.Now()
 	slog.SetDefault(slog.New(slog.NewTextHandler(Stdout, &slog.HandlerOptions{
 		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
 			// remove time
 			if a.Key == "time" {
-				return slog.Attr{}
+				return slog.Duration(slog.TimeKey, time.Since(startTime))
 			}
 			return a
 		},
@@ -22,6 +26,12 @@ func InitLogger(level slog.Level) {
 }
 
 var exitFunc = os.Exit
+
+func UsePanicForExit() {
+	exitFunc = func(code int) {
+		panic(fmt.Sprintf("exit: %d", code))
+	}
+}
 
 func FatalError(err error) {
 	if err == nil {

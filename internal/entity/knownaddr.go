@@ -6,21 +6,21 @@ import (
 )
 
 type KnownAddr struct {
-	Pclntab AddrSpace
+	TextAddrSpace AddrSpace
 
-	Symbol         AddrSpace
-	SymbolCoverage AddrCoverage
+	SymbolAddrSpace AddrSpace
+	SymbolCoverage  AddrCoverage
 }
 
 func NewKnownAddr() *KnownAddr {
 	return &KnownAddr{
-		Pclntab:        make(map[uint64]*Addr),
-		Symbol:         make(map[uint64]*Addr),
-		SymbolCoverage: make(AddrCoverage, 0),
+		TextAddrSpace:   make(map[uint64]*Addr),
+		SymbolAddrSpace: make(map[uint64]*Addr),
+		SymbolCoverage:  make(AddrCoverage, 0),
 	}
 }
 
-func (f *KnownAddr) InsertPclntab(entry uint64, size uint64, fn *Function, meta GoPclntabMeta) {
+func (f *KnownAddr) InsertTextFromPclnTab(entry uint64, size uint64, fn *Function, meta GoPclntabMeta) {
 	cur := Addr{
 		AddrPos: &AddrPos{
 			Addr: entry,
@@ -33,28 +33,63 @@ func (f *KnownAddr) InsertPclntab(entry uint64, size uint64, fn *Function, meta 
 
 		Meta: meta,
 	}
-	f.Pclntab.Insert(&cur)
+	f.TextAddrSpace.Insert(&cur)
 }
 
-func (f *KnownAddr) InsertSymbol(entry uint64, size uint64, p *Package, typ AddrType, meta SymbolMeta) *Addr {
-	cur := &Addr{
+func (f *KnownAddr) InsertTextFromDWARF(entry uint64, size uint64, fn *Function, meta DwarfMeta) {
+	cur := Addr{
 		AddrPos: &AddrPos{
 			Addr: entry,
 			Size: size,
-			Type: typ,
+			Type: AddrTypeText,
+		},
+		Pkg:        fn.pkg,
+		Function:   fn,
+		SourceType: AddrSourceDwarf,
+
+		Meta: meta,
+	}
+	f.TextAddrSpace.Insert(&cur)
+}
+
+func (f *KnownAddr) InsertSymbol(symbol *Symbol, p *Package, meta SymbolMeta) *Addr {
+	cur := &Addr{
+		AddrPos: &AddrPos{
+			Addr: symbol.Addr,
+			Size: symbol.Size,
+			Type: symbol.Type,
 		},
 		Pkg:        p,
-		Function:   nil, // TODO: try to find the function?
+		Function:   nil,
+		Symbol:     symbol,
 		SourceType: AddrSourceSymbol,
 
 		Meta: meta,
 	}
-	f.Symbol.Insert(cur)
+	f.SymbolAddrSpace.Insert(cur)
+	return cur
+}
+
+func (f *KnownAddr) InsertSymbolFromDWARF(symbol *Symbol, p *Package, meta SymbolMeta) *Addr {
+	cur := &Addr{
+		AddrPos: &AddrPos{
+			Addr: symbol.Addr,
+			Size: symbol.Size,
+			Type: symbol.Type,
+		},
+		Pkg:        p,
+		Function:   nil,
+		Symbol:     symbol,
+		SourceType: AddrSourceDwarf,
+
+		Meta: meta,
+	}
+	f.SymbolAddrSpace.Insert(cur)
 	return cur
 }
 
 func (f *KnownAddr) BuildSymbolCoverage() {
-	f.SymbolCoverage = f.Symbol.ToDirtyCoverage()
+	f.SymbolCoverage = f.SymbolAddrSpace.ToDirtyCoverage()
 }
 
 func (f *KnownAddr) SymbolCovHas(entry uint64, size uint64) (AddrType, bool) {

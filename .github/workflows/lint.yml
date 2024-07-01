@@ -1,0 +1,103 @@
+name: Lint
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+  schedule:
+    - cron: '36 15 * * 5'
+
+permissions:
+  contents: read
+
+jobs:
+  eslint:
+    permissions:
+      security-events: write
+      checks: write
+    name: ESLint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+        with:
+          node-version: '21'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # v4.0.0
+        with:
+          standalone: true
+          package_json_file: 'ui/package.json'
+          version: latest
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+        name: Setup pnpm cache
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        working-directory: ./ui
+        run: pnpm install
+
+      - name: Run ESLint
+        working-directory: ./ui
+        run: >-
+          pnpm eslint .
+          --ext ".ts,.tsx"
+          --format @microsoft/eslint-formatter-sarif
+          --output-file eslint-results.sarif
+        continue-on-error: true
+
+      - name: Upload analysis results to GitHub
+        uses: github/codeql-action/upload-sarif@b611370bb5703a7efb587f9d136a52ea24c5c38c # v3.25.11
+        with:
+          sarif_file: ./ui/eslint-results.sarif
+          wait-for-processing: true
+
+  golangci-lint:
+    name: GolangCI Lint
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      checks: write
+    steps:
+      - name: Checkout Actions Repository
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+# fixme: disable for now, wait for golangci-lint supports go 1.23
+#      - name: Run golangci-lint
+#        uses: golangci/golangci-lint-action@a4f60bb28d35aeee14e6880718e0c85ff1882e64 # v6.0.1
+#        with:
+#          version: v1.59.1
+#          args: '--out-format=colored-line-number,sarif:golangci-lint-results.sarif'
+#        continue-on-error: true
+#
+#      - name: Upload analysis results to GitHub
+#        uses: github/codeql-action/upload-sarif@b611370bb5703a7efb587f9d136a52ea24c5c38c # v3.25.11
+#        with:
+#          sarif_file: ./golangci-lint-results.sarif
+#          wait-for-processing: true
+
+  typos:
+    name: Spell Check with Typos
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: typos-action
+        uses: crate-ci/typos@c16dc8f5b4a7ad6211464ecf136c69c851e8e83c # v1.22.9
+        with:
+          config: .github/typos.toml

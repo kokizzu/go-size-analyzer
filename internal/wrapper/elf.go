@@ -1,7 +1,9 @@
 package wrapper
 
 import (
+	"debug/dwarf"
 	"debug/elf"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,8 +15,8 @@ type ElfWrapper struct {
 	file *elf.File
 }
 
-func (*ElfWrapper) PclntabSections() []string {
-	return []string{".gopclntab", ".data.rel.ro.gopclntab", ".data.rel.ro"}
+func (e *ElfWrapper) DWARF() (*dwarf.Data, error) {
+	return e.file.DWARF()
 }
 
 func (e *ElfWrapper) LoadSymbols(marker func(name string, addr uint64, size uint64, typ entity.AddrType) error) error {
@@ -52,7 +54,7 @@ func (e *ElfWrapper) LoadSymbols(marker func(name string, addr uint64, size uint
 			continue
 		}
 		sect := e.file.Sections[i]
-		typ := entity.AddrTypeUnknown
+		var typ entity.AddrType
 		switch sect.Flags & (elf.SHF_WRITE | elf.SHF_ALLOC | elf.SHF_EXECINSTR) {
 		case elf.SHF_ALLOC | elf.SHF_EXECINSTR:
 			typ = entity.AddrTypeText
@@ -127,7 +129,7 @@ func (e *ElfWrapper) ReadAddr(addr, size uint64) ([]byte, error) {
 			return data, nil
 		}
 	}
-	return nil, fmt.Errorf("address not found")
+	return nil, ErrAddrNotFound
 }
 
 func (e *ElfWrapper) Text() (textStart uint64, text []byte, err error) {
@@ -142,21 +144,21 @@ func (e *ElfWrapper) Text() (textStart uint64, text []byte, err error) {
 
 func (e *ElfWrapper) GoArch() string {
 	switch e.file.Machine {
-	// case elf.EM_386:
-	// 	return "386"
+	case elf.EM_386:
+		return "386"
 	case elf.EM_X86_64:
 		return "amd64"
-		// case elf.EM_ARM:
-		// 	return "arm"
-		// case elf.EM_AARCH64:
-		// 	return "arm64"
-		// case elf.EM_PPC64:
-		// 	if e.file.ByteOrder == binary.LittleEndian {
-		// 		return "ppc64le"
-		// 	}
-		// 	return "ppc64"
-		// case elf.EM_S390:
-		// 	return "s390x"
+	case elf.EM_ARM:
+		return "arm"
+	case elf.EM_AARCH64:
+		return "arm64"
+	case elf.EM_PPC64:
+		if e.file.ByteOrder == binary.LittleEndian {
+			return "ppc64le"
+		}
+		return "ppc64"
+	case elf.EM_S390:
+		return "s390x"
 	}
 	return ""
 }

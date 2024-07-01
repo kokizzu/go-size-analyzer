@@ -1,0 +1,57 @@
+name: Setup test script
+description: 'Setup test script, should be called after checkout'
+inputs:
+  cache:
+    default: ""
+    description: 'Cache key for test'
+  report:
+    default: "false"
+    required: false
+    description: 'Report results'
+  script:
+    required: true
+    description: 'Script to run'
+runs:
+  using: 'composite'
+  steps:
+    - name: Install poetry
+      shell: bash
+      run: pipx install poetry
+
+    - name: Setup Python
+      # fixme: use official version after https://github.com/actions/setup-python/pull/896 merged
+      uses: Zxilly/setup-python@ae59c5af9656f2efa3191e798da170f40e8832dc
+      with:
+        python-version: '3.12'
+        check-latest: true
+        cache: 'poetry'
+
+    - name: Add python dependencies
+      shell: bash
+      working-directory: ./scripts
+      run: |
+        poetry install
+
+    - name: Install svgo
+      if: ${{ inputs.report == 'true' }}
+      shell: bash
+      run: npm install -g svgo
+
+    - name: Cache test binaries
+      if: ${{ inputs.cache != '' }}
+      uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+      with:
+        path: ./scripts/bins
+        key: testbins-${{ hashFiles('scripts/binaries.csv') }}-${{ inputs.cache }}-v2
+        enableCrossOsArchive: true
+
+    - name: Run script
+      shell: bash
+      working-directory: ./scripts
+      run: poetry run python ${{ inputs.script }}
+
+    - name: Report results
+      if: ${{ inputs.report == 'true' }}
+      shell: bash
+      working-directory: ./scripts
+      run: poetry run python report.py

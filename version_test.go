@@ -1,33 +1,32 @@
-package gsv
+package gsa
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestSprintVersion(t *testing.T) {
-	got := SprintVersion()
+	t.Run("Normal", func(t *testing.T) {
+		got := SprintVersion()
 
-	keys := []string{"Version", "Git Commit", "Build Date", "Commit Date", "Dirty Build", "Go Version", "Platform"}
-	for _, key := range keys {
-		assert.Contains(t, got, key)
-	}
-}
+		keys := []string{"Version", "Go Version", "Platform"}
+		for _, key := range keys {
+			assert.Contains(t, got, key)
+		}
+	})
 
-func TestGetStaticVersion(t *testing.T) {
-	tests := []struct {
-		name string
-		want int
-	}{
-		{
-			name: "Test GetStaticVersion",
-			want: 1,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equalf(t, tt.want, GetStaticVersion(), "GetStaticVersion()")
-		})
-	}
+	t.Run("Fake release", func(t *testing.T) {
+		buildDate = time.Now().Format(time.RFC3339)
+		commitDate = time.Now().Format(time.RFC3339)
+		dirtyBuild = "true"
+
+		got := SprintVersion()
+
+		keys := []string{"Version", "Go Version", "Platform", "Build Date", "Commit Date", "Dirty Build"}
+		for _, key := range keys {
+			assert.Contains(t, got, key)
+		}
+	})
 }

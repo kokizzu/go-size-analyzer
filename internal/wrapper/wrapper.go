@@ -1,12 +1,14 @@
 package wrapper
 
 import (
+	"debug/dwarf"
 	"debug/elf"
 	"debug/macho"
 	"debug/pe"
 	"errors"
 
 	"github.com/Zxilly/go-size-analyzer/internal/entity"
+	"github.com/Zxilly/go-size-analyzer/internal/utils"
 )
 
 var ErrNoSymbolTable = errors.New("no symbol table found")
@@ -17,7 +19,7 @@ type RawFileWrapper interface {
 	ReadAddr(addr, size uint64) ([]byte, error)
 	LoadSymbols(marker func(name string, addr, size uint64, typ entity.AddrType) error) error
 	LoadSections() map[string]*entity.Section
-	PclntabSections() []string
+	DWARF() (*dwarf.Data, error)
 }
 
 func NewWrapper(file any) RawFileWrapper {
@@ -25,7 +27,7 @@ func NewWrapper(file any) RawFileWrapper {
 	case *elf.File:
 		return &ElfWrapper{f}
 	case *pe.File:
-		return &PeWrapper{f}
+		return &PeWrapper{f, utils.GetImageBase(f)}
 	case *macho.File:
 		return &MachoWrapper{f}
 	}

@@ -1,4 +1,4 @@
-package gsv
+package gsa
 
 import (
 	"fmt"
@@ -16,16 +16,11 @@ const (
 )
 
 const (
-	// when update this, also update the version string in workflow
-	staticVersion = 1
+	// StaticVersion when update this, also update the version string in workflow
+	StaticVersion = "1"
 )
 
-func GetStaticVersion() int {
-	return staticVersion
-}
-
 var (
-	name       = unknownProperty
 	version    = unknownVersion
 	commit     = unknownProperty
 	buildDate  = unknownProperty
@@ -94,6 +89,10 @@ func SprintVersion() string {
 	keys := []string{"Version", "Git Commit", "Build Date", "Commit Date", "Dirty Build", "Go Version", "Platform"}
 
 	for _, k := range keys {
+		if values[k] == unknownProperty {
+			continue
+		}
+
 		s.WriteString(fmt.Sprintf("  %-11s      %s\n", k, values[k]))
 	}
 

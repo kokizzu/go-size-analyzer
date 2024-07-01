@@ -1,21 +1,38 @@
 # go-size-analyzer
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/Zxilly/go-size-analyzer)](https://goreportcard.com/report/github.com/Zxilly/go-size-analyzer)
-[![Tests](https://github.com/Zxilly/go-size-analyzer/actions/workflows/tests.yml/badge.svg)](https://github.com/Zxilly/go-size-analyzer/actions/workflows/tests.yml)
-[![codecov](https://codecov.io/github/Zxilly/go-size-analyzer/graph/badge.svg?token=Q4TDH6RFZN)](https://codecov.io/github/Zxilly/go-size-analyzer)
+[![Tests](https://github.com/Zxilly/go-size-analyzer/actions/workflows/built-tests.yml/badge.svg)](https://github.com/Zxilly/go-size-analyzer/actions/workflows/built-tests.yml)
+[![Codecov](https://img.shields.io/codecov/c/gh/Zxilly/go-size-analyzer)](https://codecov.io/github/Zxilly/go-size-analyzer)
 [![GitHub release](https://img.shields.io/github/v/release/Zxilly/go-size-analyzer)](https://github.com/Zxilly/go-size-analyzer/releases)
+[![go-recipes](https://raw.githubusercontent.com/nikolaydubina/go-recipes/main/badge.svg?raw=true)](https://github.com/nikolaydubina/go-recipes?tab=readme-ov-file#-visualise-dependencies-size-in-compiled-binaries-with-go-size-analyzer)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Zxilly/go-size-analyzer/badge)](https://scorecard.dev/viewer/?uri=github.com/Zxilly/go-size-analyzer)
 
 English | [简体中文](./README_zh-CN.md)
 
 A simple tool to analyze the size of a Go compiled binary.
 
+[![Packaging status](https://repology.org/badge/vertical-allrepos/go-size-analyzer.svg)](https://repology.org/project/go-size-analyzer/versions)
+
 ## Installation
 
-Download the latest release from the [release page](https://github.com/Zxilly/go-size-analyzer/releases)
+### [Download the latest binary](https://github.com/Zxilly/go-size-analyzer/releases)
 
-Or use the following command to install the latest version:
+### MacOS / Linux via Homebrew:
 
-```bash
+Using [Homebrew](https://brew.sh/)
+```
+brew install go-size-analyzer
+```
+
+### Windows:
+
+Using [scoop](https://scoop.sh/)
+```
+scoop install go-size-analyzer
+```
+
+### Go Install:
+```
 go install github.com/Zxilly/go-size-analyzer/cmd/gsa@latest
 ```
 
@@ -31,24 +48,27 @@ $ gsa --web golang-compiled-binary
 
 Will start a web server on port 8080, you can view the result in your browser.
 
+Or you can use the WASM version in the browser: [GSA Treemap](https://gsa.zxilly.dev)
+
+> [!NOTE]  
+> Due to the limitation of the browser, the wasm version is much slower than the native version.
+> Normally costs 10x time to analyze the same binary.
+> 
+> Only recommended for analysing small applications (less than 30 MB in size)
+
 The web page will look like this:
 
-![image](https://github.com/Zxilly/go-size-analyzer/assets/31370133/78bb8105-fc5a-4852-8704-8c2fac3bf475)
-
+![image](https://github.com/Zxilly/go-size-analyzer/assets/31370133/e69583ce-b189-4a0d-b108-c3b7d5c33a82)
 
 You can click to expand the package to see the details.
 
-#### Terminal UI (Experimental)
+#### Terminal UI
 
 ```bash
 $ gsa --tui golang-compiled-binary
 ```
 
-![image](https://github.com/Zxilly/go-size-analyzer/assets/31370133/04556f54-7ebb-42b8-ac57-91a17887a44e)
-
-> [!NOTE]  
-> There may be a problem with the UI display on Windows, which is caused by dependent libraries. 
-> Try running it on linux/WSL if you encounter problems.
+![demo](https://github.com/Zxilly/go-size-analyzer/assets/31370133/9f38989e-ab9f-4098-a939-26ca23fef407)
 
 #### Text mode 
 
@@ -112,7 +132,7 @@ gsa cockroach-darwin-amd64 -f svg -o data.svg --hide-sections
 ```bash
 Usage: gsa <file> [flags]
 
-A tool for analysing the size of dependencies in compiled Golang binaries,
+A tool for analyzing the size of dependencies in compiled Golang binaries,
 providing insight into their impact on the final build.
 
 Arguments:
@@ -124,6 +144,7 @@ Flags:
   -f, --format="text"    Output format, possible values: text,json,html,svg
       --no-disasm        Skip disassembly pass
       --no-symbol        Skip symbol pass
+      --no-dwarf         Skip dwarf pass
   -o, --output=STRING    Write to file
       --version          Show version
 
@@ -143,7 +164,7 @@ Svg output options
   --padding-box=4      Padding between box border and content
   --padding-root=32    Padding around root content
 
-Web explorer options
+Web interface options
   --web               use web interface to explore the details
   --listen=":8080"    listen address
   --open              Open browser
@@ -159,11 +180,12 @@ Terminal interface options
 ## TODO
 
 - [ ] Add more pattern for disassembling the binary
-- [ ] Extract the information from the dwarf section
+- [x] Extract the information from the DWARF section
 - [x] Count the symbol size itself to package
 - [ ] Add other charts like flame graph, pie chart, etc.
 - [ ] Support C++/Rust symbol demangling in cgo
 - [x] Add a TUI mode for exploring details
+- [x] Compile to wasm, create a ui to analyze the binary in the browser
 
 ## Contribution
 

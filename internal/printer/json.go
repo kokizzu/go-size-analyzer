@@ -1,34 +1,42 @@
+//go:build !js && !wasm
+
 package printer
 
 import (
-	"encoding/json"
+	"io"
+	"log/slog"
 	"strings"
 
-	"github.com/Zxilly/go-size-analyzer/internal/global"
+	"github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
+
+	"github.com/Zxilly/go-size-analyzer/internal/entity/marshaler"
 	"github.com/Zxilly/go-size-analyzer/internal/result"
-	"github.com/Zxilly/go-size-analyzer/internal/utils"
 )
 
-type JsonOption struct {
+type JSONOption struct {
+	Writer     io.Writer
 	Indent     *int
 	HideDetail bool
 }
 
-func Json(r *result.Result, options *JsonOption) []byte {
+func JSON(r *result.Result, options *JSONOption) error {
+	slog.Info("JSON encoding...")
+
+	jsonOptions := []json.Options{
+		json.DefaultOptionsV2(),
+		json.Deterministic(true),
+	}
+	if options.Indent != nil {
+		jsonOptions = append(jsonOptions, jsontext.WithIndent(strings.Repeat(" ", *options.Indent)))
+	}
 	if options.HideDetail {
-		global.HideDetail = true
+		jsonOptions = append(jsonOptions, json.WithMarshalers(marshaler.GetFileCompactMarshaler()))
 	}
 
-	var b []byte
-	var err error
-	if options.Indent == nil {
-		b, err = json.Marshal(r)
-	} else {
-		b, err = json.MarshalIndent(r, "", strings.Repeat(" ", *options.Indent))
-	}
-	if err != nil {
-		utils.FatalError(err)
-	}
+	err := json.MarshalWrite(options.Writer, r, jsonOptions...)
 
-	return b
+	slog.Info("JSON encoded")
+
+	return err
 }

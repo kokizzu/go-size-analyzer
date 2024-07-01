@@ -1,57 +1,60 @@
-import {defineConfig, PluginOption} from 'vite'
-import react from '@vitejs/plugin-react-swc'
+import * as fs from "node:fs"
+import {HtmlTagDescriptor, defineConfig} from 'vite';
 import {viteSingleFile} from "vite-plugin-singlefile"
-import * as fs from "fs"
 import {createHtmlPlugin} from "vite-plugin-html";
-import {codecovVitePlugin} from "@codecov/vite-plugin";
+import {build, codecov, commonPlugin, getVersionTag} from "./vite.common";
 
-const devDataMocker: PluginOption = {
-    name: 'devDataMocker',
-    transformIndexHtml: async (html) => {
-        if (process.env.NODE_ENV === "production") {
-            return html
-        }
-        try {
-            const data = await fs.promises.readFile(new URL("./data.json", import.meta.url), "utf-8")
-            return html.replace(`"GSA_PACKAGE_DATA"`, data)
-        } catch (e) {
-            console.error("Failed to load data.json, for dev you should create one with gsa", e)
-            return html
-        }
+
+const placeHolder = `"GSA_PACKAGE_DATA"`
+
+const getPlaceHolder = (): string => {
+    if (process.env.NODE_ENV === "production") {
+        return placeHolder
     }
+
+    try {
+        return fs.readFileSync(
+            new URL("../testdata/result.json", import.meta.url),
+            "utf-8"
+        )
+    } catch (e) {
+        console.error("Failed to load data.json, for dev you should create one with gsa", e)
+        return placeHolder
+    }
+}
+
+const tags: HtmlTagDescriptor[] = [
+    {
+        injectTo: "head",
+        tag: "script",
+        attrs: {
+            type: "application/json",
+            id: "data"
+        },
+        children: getPlaceHolder()
+    },
+
+]
+const versionTag = getVersionTag();
+if (versionTag) {
+    tags.push(versionTag);
 }
 
 export default defineConfig({
     plugins: [
-        react(),
+        ...commonPlugin(),
+        createHtmlPlugin({
+            minify: true,
+            entry: './src/main.tsx',
+            inject: {tags}
+        }),
         viteSingleFile(
             {
                 removeViteModuleLoader: true
             }
         ),
-        devDataMocker,
-        createHtmlPlugin({
-            minify: true,
-        }),
-        codecovVitePlugin({
-            enableBundleAnalysis: process.env.CODECOV_TOKEN !== undefined,
-            bundleName: "gsa-ui",
-            uploadToken: process.env.CODECOV_TOKEN,
-        }),
+        codecov("gsa-ui"),
     ],
     clearScreen: false,
-    esbuild: {
-        legalComments: 'none',
-    },
-    build: {
-        cssMinify: "lightningcss",
-        minify: "terser",
-        terserOptions: {
-            compress: {
-                passes: 2,
-                ecma: 2020,
-                dead_code: true,
-            }
-        }
-    }
+    build: build("webui"),
 })

@@ -1,18 +1,23 @@
+//go:build !js && !wasm
+
 package printer
 
 import (
 	"cmp"
 	"fmt"
+	"io"
+	"log/slog"
+	"maps"
 	"path/filepath"
 	"slices"
 
 	"github.com/dustin/go-humanize"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/samber/lo"
-	"golang.org/x/exp/maps"
 
 	"github.com/Zxilly/go-size-analyzer/internal/entity"
 	"github.com/Zxilly/go-size-analyzer/internal/result"
+	"github.com/Zxilly/go-size-analyzer/internal/utils"
 )
 
 func percentString(f float64) string {
@@ -20,12 +25,15 @@ func percentString(f float64) string {
 }
 
 type CommonOption struct {
+	Writer       io.Writer
 	HideSections bool
 	HideMain     bool
 	HideStd      bool
 }
 
-func Text(r *result.Result, options *CommonOption) string {
+func Text(r *result.Result, options *CommonOption) error {
+	slog.Info("Printing text report")
+
 	t := table.NewWriter()
 
 	allKnownSize := uint64(0)
@@ -42,7 +50,7 @@ func Text(r *result.Result, options *CommonOption) string {
 
 	entries := make([]sizeEntry, 0)
 
-	pkgs := maps.Values(r.Packages)
+	pkgs := utils.Collect(maps.Values(r.Packages))
 	for _, p := range pkgs {
 		if options.HideMain && p.Type == entity.PackageTypeMain {
 			continue
@@ -87,5 +95,13 @@ func Text(r *result.Result, options *CommonOption) string {
 	t.AppendFooter(table.Row{percentString(float64(allKnownSize) / float64(r.Size) * 100), "Known", humanize.Bytes(allKnownSize)})
 	t.AppendFooter(table.Row{"100%", "Total", humanize.Bytes(r.Size)})
 
-	return t.Render()
+	data := []byte(t.Render() + "\n")
+
+	slog.Info("Report rendered")
+
+	_, err := options.Writer.Write(data)
+
+	slog.Info("Report written")
+
+	return err
 }

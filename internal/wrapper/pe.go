@@ -1,21 +1,22 @@
 package wrapper
 
 import (
+	"debug/dwarf"
 	"debug/pe"
 	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/Zxilly/go-size-analyzer/internal/entity"
-	"github.com/Zxilly/go-size-analyzer/internal/utils"
 )
 
 type PeWrapper struct {
-	file *pe.File
+	file      *pe.File
+	imageBase uint64
 }
 
-func (*PeWrapper) PclntabSections() []string {
-	return []string{".rdata"} // FIXME: get real position from gore, can be .text
+func (p *PeWrapper) DWARF() (*dwarf.Data, error) {
+	return p.file.DWARF()
 }
 
 func (p *PeWrapper) LoadSymbols(marker func(name string, addr uint64, size uint64, typ entity.AddrType) error) error {
@@ -23,12 +24,10 @@ func (p *PeWrapper) LoadSymbols(marker func(name string, addr uint64, size uint6
 		return ErrNoSymbolTable
 	}
 
-	imageBase := utils.GetImageBase(p.file)
-
 	const (
-		NUndef = 0
-		NAbs   = -1
-		NDebug = -2
+		nUndef = 0
+		nAbs   = -1
+		nDebug = -2
 	)
 
 	type sym struct {
@@ -40,7 +39,7 @@ func (p *PeWrapper) LoadSymbols(marker func(name string, addr uint64, size uint6
 
 	peSyms := make([]*pe.Symbol, 0)
 	for _, s := range p.file.Symbols {
-		if s.SectionNumber == NDebug || s.SectionNumber == NAbs || s.SectionNumber == NUndef {
+		if s.SectionNumber == nDebug || s.SectionNumber == nAbs || s.SectionNumber == nUndef {
 			continue // not addr, skip
 		}
 		if s.SectionNumber < 0 || len(p.file.Sections) < int(s.SectionNumber) {
@@ -64,9 +63,9 @@ func (p *PeWrapper) LoadSymbols(marker func(name string, addr uint64, size uint6
 		sect := p.file.Sections[s.SectionNumber-1]
 		ch := sect.Characteristics
 
-		a := uint64(s.Value) + imageBase + uint64(sect.VirtualAddress)
+		a := uint64(s.Value) + p.imageBase + uint64(sect.VirtualAddress)
 
-		typ := entity.AddrTypeUnknown
+		var typ entity.AddrType
 		switch {
 		case ch&text != 0:
 			typ = entity.AddrTypeText
@@ -108,8 +107,6 @@ func (p *PeWrapper) LoadSymbols(marker func(name string, addr uint64, size uint6
 }
 
 func (p *PeWrapper) LoadSections() map[string]*entity.Section {
-	imageBase := utils.GetImageBase(p.file)
-
 	ret := make(map[string]*entity.Section)
 	for _, section := range p.file.Sections {
 		d := strings.HasPrefix(section.Name, ".debug_") || strings.HasPrefix(section.Name, ".zdebug_")
@@ -124,8 +121,8 @@ func (p *PeWrapper) LoadSections() map[string]*entity.Section {
 			FileSize:     uint64(section.Size),
 			Offset:       uint64(section.Offset),
 			End:          uint64(section.Offset + section.Size),
-			Addr:         imageBase + uint64(section.VirtualAddress),
-			AddrEnd:      imageBase + uint64(section.VirtualAddress+section.VirtualSize),
+			Addr:         p.imageBase + uint64(section.VirtualAddress),
+			AddrEnd:      p.imageBase + uint64(section.VirtualAddress+section.VirtualSize),
 			OnlyInMemory: false, // pe file didn't have an only-in-memory section
 			Debug:        d,
 		}
@@ -134,9 +131,12 @@ func (p *PeWrapper) LoadSections() map[string]*entity.Section {
 }
 
 func (p *PeWrapper) ReadAddr(addr, size uint64) ([]byte, error) {
-	pf := p.file
-	for _, sect := range pf.Sections {
-		if uint64(sect.VirtualAddress) <= addr && addr+size <= uint64(sect.VirtualAddress+sect.VirtualSize) {
+	if addr < p.imageBase {
+		return nil, ErrAddrNotFound
+	}
+	addr -= p.imageBase
+	for _, sect := range p.file.Sections {
+		if uint64(sect.VirtualAddress) <= addr && addr+size <= uint64(sect.VirtualAddress+sect.Size) {
 			data := make([]byte, size)
 			if _, err := sect.ReadAt(data, int64(addr-uint64(sect.VirtualAddress))); err != nil {
 				return nil, err
@@ -144,31 +144,29 @@ func (p *PeWrapper) ReadAddr(addr, size uint64) ([]byte, error) {
 			return data, nil
 		}
 	}
-	return nil, fmt.Errorf("address not found")
+	return nil, ErrAddrNotFound
 }
 
 func (p *PeWrapper) Text() (textStart uint64, text []byte, err error) {
-	imageBase := utils.GetImageBase(p.file)
-
 	sect := p.file.Section(".text")
 	if sect == nil {
 		return 0, nil, fmt.Errorf("text section not found")
 	}
-	textStart = imageBase + uint64(sect.VirtualAddress)
+	textStart = p.imageBase + uint64(sect.VirtualAddress)
 	text, err = sect.Data()
-	return
+	return textStart, text, err
 }
 
 func (p *PeWrapper) GoArch() string {
 	switch p.file.Machine {
-	// case pe.IMAGE_FILE_MACHINE_I386:
-	//	return "386"
+	case pe.IMAGE_FILE_MACHINE_I386:
+		return "386"
 	case pe.IMAGE_FILE_MACHINE_AMD64:
 		return "amd64"
-	// case pe.IMAGE_FILE_MACHINE_ARMNT:
-	//	return "arm"
-	// case pe.IMAGE_FILE_MACHINE_ARM64:
-	//	return "arm64"
+	case pe.IMAGE_FILE_MACHINE_ARMNT:
+		return "arm"
+	case pe.IMAGE_FILE_MACHINE_ARM64:
+		return "arm64"
 	default:
 		return ""
 	}

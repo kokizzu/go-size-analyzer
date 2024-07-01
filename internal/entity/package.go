@@ -1,13 +1,14 @@
 package entity
 
 import (
+	"debug/dwarf"
 	"fmt"
+	"maps"
 	"runtime/debug"
 
 	"github.com/ZxillyFork/gore"
 	"github.com/ZxillyFork/gosym"
 	"github.com/samber/lo"
-	"golang.org/x/exp/maps"
 
 	"github.com/Zxilly/go-size-analyzer/internal/utils"
 )
@@ -22,6 +23,7 @@ const (
 	PackageTypeVendor    PackageType = "vendor"
 	PackageTypeGenerated PackageType = "generated"
 	PackageTypeUnknown   PackageType = "unknown"
+	PackageTypeCGO       PackageType = "cgo"
 )
 
 type Package struct {
@@ -33,20 +35,23 @@ type Package struct {
 
 	Size uint64 `json:"size"` // late filled
 
+	filesCache map[string]*File
+	funcsCache map[string]*Function
+
 	loaded bool // mean it comes from gore
 
 	// should not be used to calculate size,
 	// since linker can create overlapped symbols.
 	// relies on coverage.
-	// currently only data symbol
 	Symbols []*Symbol `json:"symbols"`
 
 	symbolAddrSpace AddrSpace
 	coverage        *utils.ValueOnce[AddrCoverage]
 
-	// should have at least one of them
-	GorePkg  *gore.Package `json:"-"`
-	DebugMod *debug.Module `json:"-"`
+	// should have at least one of them, for cgo pseudo package all nil
+	gorePkg    *gore.Package
+	debugMod   *debug.Module
+	dwarfEntry *dwarf.Entry
 }
 
 func NewPackage() *Package {
@@ -56,6 +61,8 @@ func NewPackage() *Package {
 		Symbols:         make([]*Symbol, 0),
 		coverage:        utils.NewOnce[AddrCoverage](),
 		symbolAddrSpace: AddrSpace{},
+		filesCache:      make(map[string]*File),
+		funcsCache:      make(map[string]*Function),
 	}
 }
 
@@ -64,7 +71,7 @@ func NewPackageWithGorePackage(gp *gore.Package, name string, typ PackageType, p
 	p.Name = utils.Deduplicate(name)
 	p.Type = typ
 	p.loaded = true
-	p.GorePkg = gp
+	p.gorePkg = gp
 
 	getFunction := func(f *gore.Function) *Function {
 		return &Function{
@@ -95,40 +102,75 @@ func NewPackageWithGorePackage(gp *gore.Package, name string, typ PackageType, p
 	return p
 }
 
+func (p *Package) SetDebugMod(mod *debug.Module) {
+	p.debugMod = mod
+}
+
+func (p *Package) SetDwarfEntry(entry *dwarf.Entry) {
+	p.dwarfEntry = entry
+}
+
 func (p *Package) fileEnsureUnique() {
-	seen := make(map[string]*File)
+	fileSeen := make(map[string]*File)
+
 	for _, f := range p.Files {
-		if old, ok := seen[f.FilePath]; ok {
-			old.Functions = append(old.Functions, f.Functions...)
+		if old, ok := fileSeen[f.FilePath]; ok {
+			funcSeen := make(map[string]*Function)
+			for _, fn := range old.Functions {
+				funcSeen[fn.Name] = fn
+			}
+
+			for _, fn := range f.Functions {
+				if _, ok := funcSeen[fn.Name]; !ok {
+					old.Functions = append(old.Functions, fn)
+				}
+			}
 		} else {
-			seen[f.FilePath] = f
+			fileSeen[f.FilePath] = f
 		}
 	}
-	p.Files = maps.Values(seen)
+
+	p.Files = utils.Collect(maps.Values(fileSeen))
+	p.filesCache = fileSeen
+
+	p.funcsCache = make(map[string]*Function)
+	for _, f := range p.Files {
+		for _, fn := range f.Functions {
+			p.funcsCache[fn.Name] = fn
+		}
+	}
 }
 
 func (p *Package) addFunction(path string, fn *Function) {
 	file := p.getOrInitFile(path)
 
-	fn.File = file
+	fn.SetFile(file)
 
 	file.Functions = append(file.Functions, fn)
 }
 
+func (p *Package) AddFuncIfNotExists(path string, fn *Function) bool {
+	if _, ok := p.funcsCache[fn.Name]; !ok {
+		p.addFunction(path, fn)
+		p.funcsCache[fn.Name] = fn
+		return true
+	}
+	return false
+}
+
 func (p *Package) getOrInitFile(s string) *File {
-	for _, f := range p.Files {
-		if f.FilePath == s {
-			return f
-		}
+	if f, ok := p.filesCache[s]; ok {
+		return f
 	}
 
 	f := &File{
 		FilePath:  utils.Deduplicate(s),
-		Pkg:       p,
+		PkgName:   p.Name,
 		Functions: make([]*Function, 0),
 	}
 
 	p.Files = append(p.Files, f)
+	p.filesCache[f.FilePath] = f
 	return f
 }
 
@@ -142,9 +184,7 @@ func (p *Package) Merge(rp *Package) {
 		panic(fmt.Errorf("package name not match %s %s", p.Name, rp.Name))
 	}
 
-	for _, f := range rp.Files {
-		p.Files = append(p.Files, f)
-	}
+	p.Files = append(p.Files, rp.Files...)
 	// prevent duplicate files
 	p.fileEnsureUnique()
 
@@ -210,10 +250,10 @@ func (p *Package) AssignPackageSize() {
 	p.Size = pkgSize
 }
 
-func (p *Package) AddSymbol(addr uint64, size uint64, typ AddrType, name string, ap *Addr) {
+func (p *Package) AddSymbol(symbol *Symbol, ap *Addr) {
 	// first, load as coverage
 	p.symbolAddrSpace.Insert(ap)
 
 	// then, add to the symbol list
-	p.Symbols = append(p.Symbols, NewSymbol(name, addr, size, typ))
+	p.Symbols = append(p.Symbols, symbol)
 }

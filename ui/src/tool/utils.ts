@@ -1,7 +1,6 @@
-import {Result} from "../schema/schema.ts";
-import {parseResult} from "../generated/schema.ts";
+import {Result, parseResult} from "../generated/schema.ts";
 
-export function loadData(): Result {
+export function loadDataFromEmbed(): Result {
     const doc = document.querySelector("#data")!;
     const ret = parseResult(doc.textContent!);
     if (ret === null) {
@@ -9,7 +8,6 @@ export function loadData(): Result {
     }
     return ret;
 }
-
 
 export function formatBytes(bytes: number) {
     if (bytes == 0) return '0 B';
@@ -26,8 +24,7 @@ export function title(s: string): string {
 
 export function trimPrefix(str: string, prefix: string) {
     if (str.startsWith(prefix)) {
-        return str.slice(prefix.length)
-    } else {
-        return str
+        return str.slice(prefix.length);
     }
+    return str;
 }

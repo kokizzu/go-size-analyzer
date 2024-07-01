@@ -16,3 +16,5 @@ type SymbolMeta struct {
 type DisasmMeta struct {
 	Value string
 }
+
+type DwarfMeta struct{}

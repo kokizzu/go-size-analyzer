@@ -10,14 +10,20 @@ go.work
 dist/
 
 vendor/
+venv/
 
 .idea/
 .vscode/
 
-scripts/bins/
-scripts/__pycache__/
-
 results/
 covdata/
+temp/
 
 *.profile
+default.pgo
+
+data.json
+
+*.sarif
+
+unit*.xml

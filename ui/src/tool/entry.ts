@@ -1,291 +1,398 @@
-import {
-    File,
-    isFile,
-    isPackage,
-    isResult,
-    isSection,
-    isSymbol,
-    Package,
-    Result,
-    Section,
-    Symbol as FileSymbol
-} from "../generated/schema.ts";
-import {id} from "./id.ts";
-import {formatBytes, title} from "./utils.ts";
-import {max} from "d3-array";
+import {File, FileSymbol, Package, Result, Section} from "../generated/schema.ts";
+import {orderedID} from "./id.ts";
+import {formatBytes, title, trimPrefix} from "./utils.ts";
+import {aligner} from "./aligner.ts";
 
-type Candidate = Section | File | Package | Result | FileSymbol;
+export type EntryType = "section" | "file" | "package" | "result" | "symbol" | "disasm" | "unknown" | "container";
 
-type EntryType = "section" | "file" | "package" | "result" | "symbol" | "disasm" | "unknown" | "container";
+export type EntryChildren = {
+    "section": never[],
+    "file": never[],
+    "package": EntryLike<"package" | "symbol" | "disasm" | "file">[],
+    "result": EntryLike<"section" | "container" | "unknown">[],
+    "symbol": never[],
+    "disasm": never[],
+    "unknown": never[],
+    "container": EntryLike<"package" | "disasm" | "section">[]
+}
 
-export class Entry {
-    private readonly type: EntryType;
-    private readonly data?: Candidate;
-    private readonly size: number;
-    private readonly name: string;
-    private readonly children: Entry[] = [];
-    private readonly uid = id();
-    explain: string = ""; // should only be used by the container type
+export interface EntryLike<T extends EntryType> {
+    toString(): string;
 
-    constructor(data: Candidate)
-    constructor(name: string, size: number, type: EntryType, children?: Entry[])
-    constructor(data_or_name: Candidate | string, size?: number, type?: EntryType, children: Entry[] = []) {
-        if (typeof data_or_name === "string") {
-            this.type = type!;
-            this.size = size!;
-            this.name = data_or_name;
-            this.children = children;
-            return
-        }
+    getSize(): number;
 
-        this.type = Entry.checkType(data_or_name);
-        this.data = data_or_name;
-        this.size = Entry.loadSize(data_or_name);
-        this.name = Entry.candidateName(data_or_name, this.type);
-        this.children = Entry.childrenFromData(data_or_name, this.type);
+    getName(): string;
+
+    getURLSafeName(): string;
+
+    getChildren(): EntryChildren[T]
+
+    getID(): number;
+
+    getType(): T;
+}
+
+class BaseImpl {
+    private readonly id = orderedID()
+
+    getID(): number {
+        return this.id;
     }
 
-    static childrenFromData(data: Candidate, type: EntryType): Entry[] {
-        switch (type) {
-            case "section":
-            case "file":
-            case "symbol":
-                return []; // no children for section or file
-            case "package":
-                return childrenFromPackage(data as Package);
-            case "result":
-                return childrenFromResult(data as Result);
-            default:
-                throw new Error(`Unknown type: ${type} in childrenFromData`);
-        }
+    getName(): string {
+        throw new Error("Not implemented");
     }
 
-    static candidateName(candidate: Candidate, type: EntryType): string {
-        switch (type) {
-            case "section":
-            case "result":
-            case "package":
-            case "symbol":
-                return (<Section | Result | Package | FileSymbol>candidate).name;
+    getURLSafeName(): string {
+        return this.getName();
+    }
+}
 
-            case "file":
-                return (<File>candidate).file_path.split("/").pop()!;
-
-            default:
-                throw new Error(`Unknown type: ${type} in candidateName`);
-        }
-
+export class SectionImpl extends BaseImpl implements EntryLike<"section"> {
+    constructor(private readonly data: Section) {
+        super();
     }
 
-    static loadSize(data: Candidate): number {
-        switch (true) {
-            case isSection(data):
-                return data.size - data.known_size;
-            default:
-                return data.size;
-        }
+    getChildren(): EntryChildren["section"] {
+        return [];
     }
 
-    static checkType(candidate: Candidate): EntryType {
-        switch (true) {
-            case isSection(candidate):
-                return "section";
-            case isFile(candidate):
-                return "file";
-            case isPackage(candidate):
-                return "package";
-            case isResult(candidate):
-                return "result";
-            case isSymbol(candidate):
-                return "symbol";
-            default:
-                throw new Error(`Unknown type in checkType`);
-        }
+
+    override getName(): string {
+        return this.data.name;
     }
 
-    public toString(): string {
+    getSize(): number {
+        return this.data.file_size - this.data.known_size;
+    }
+
+    toString(): string {
         const align = new aligner();
+        align.add("Section:", this.data.name)
+            .add("Size:", formatBytes(this.getSize()))
+            .add("File Size:", formatBytes(this.data.file_size))
+            .add("Known size:", formatBytes(this.data.known_size))
+            .add("Unknown size:", formatBytes(this.getSize()))
+            .add("Offset:", `0x${this.data.offset.toString(16)} - 0x${this.data.end.toString(16)}`)
+            .add("Address:", `0x${this.data.addr.toString(16)} - 0x${this.data.addr_end.toString(16)}`)
+            .add("Memory:", this.data.only_in_memory.toString())
+            .add("Debug:", this.data.debug.toString());
+        return align.toString();
+    }
 
-        function assertTyp<T extends Candidate>(_c?: Candidate): asserts _c is T {
+    getType(): "section" {
+        return "section";
+    }
+}
+
+export class FileImpl extends BaseImpl implements EntryLike<"file"> {
+    constructor(private readonly data: File) {
+        super();
+    }
+
+    getChildren(): EntryChildren["file"] {
+        return [];
+    }
+
+    override getName(): string {
+        return this.data.file_path.split("/").pop()!;
+    }
+
+    getSize(): number {
+        return this.data.size;
+    }
+
+    toString(): string {
+        const align = new aligner();
+        align.add("File:", this.data.file_path)
+            .add("Path:", this.data.file_path)
+            .add("Size:", formatBytes(this.data.size))
+        if (this.data.pcln_size > 0) {
+            align.add("Pcln Size:", formatBytes(this.data.pcln_size))
+        }
+        return align.toString();
+    }
+
+    getType(): "file" {
+        return "file";
+    }
+}
+
+export class PackageImpl extends BaseImpl implements EntryLike<"package"> {
+    private readonly children: EntryChildren["package"];
+
+    constructor(private readonly data: Package, private readonly parent?: string) {
+        super();
+
+        const children: EntryChildren["package"] = [];
+        for (const file of data.files) {
+            children.push(new FileImpl(file));
+        }
+        for (const subPackage of Object.values(data.subPackages)) {
+            children.push(new PackageImpl(subPackage, data.name));
         }
 
-        switch (this.type) {
-            case "section":
-                assertTyp<Section>(this.data);
-                align.add("Section:", this.name);
-                align.add("Size:", formatBytes(this.size));
-                align.add("File Size:", formatBytes(this.data.file_size));
-                align.add("Known size:", formatBytes(this.data.known_size));
-                align.add("Unknown size:", formatBytes(this.data.size - this.data.known_size));
-                align.add("Offset:", `0x${this.data.offset.toString(16)} - 0x${this.data.end.toString(16)}`);
-                align.add("Address:", `0x${this.data.addr.toString(16)} - 0x${this.data.addr_end.toString(16)}`);
-                align.add("Memory:", this.data.only_in_memory.toString());
-                align.add("Debug:", this.data.debug.toString());
-                return align.toString();
-
-            case "file":
-                assertTyp<File>(this.data);
-                align.add("File:", this.data.file_path);
-                align.add("Path:", this.data.file_path);
-                align.add("Size:", formatBytes(this.data.size));
-                align.add("Pcln Size:", formatBytes(this.data.pcln_size));
-                return align.toString();
-
-            case "package":
-                assertTyp<Package>(this.data);
-                align.add("Package:", this.data.name);
-                align.add("Type:", this.data.type);
-                align.add("Size:", formatBytes(this.data.size));
-                return align.toString();
-
-            case "result":
-                assertTyp<Result>(this.data);
-                align.add("Result:", this.data.name);
-                align.add("Size:", formatBytes(this.data.size));
-                return align.toString();
-
-            case "disasm": {
-                align.add("Disasm:", this.name);
-                align.add("Size:", formatBytes(this.size));
-                let ret = align.toString();
-                ret += "\n\n" +
-                    "This size was not accurate." +
-                    "The real size determined by disassembling can be larger.";
-                return ret;
-            }
-
-            case "symbol": {
-                assertTyp<FileSymbol>(this.data);
-                align.add("Symbol:", this.data.name);
-                align.add("Size:", formatBytes(this.size));
-                align.add("Address:", `0x${this.data.addr.toString(16)}`);
-                align.add("Type:", this.data.type);
-                return align.toString();
-            }
-
-            case "unknown": {
-                align.add("Size:", formatBytes(this.size));
-                let ret = align.toString();
-                ret += "\n\n" +
-                    "The unknown part in the binary.\n" +
-                    "Can be ELF Header, Program Header, align offset...\n" +
-                    "We just don't know.";
-                return ret;
-            }
-
-            case "container": {
-                let ret = this.explain + "\n"
-                align.add("Size:", formatBytes(this.size));
-                ret += "\n" + align.toString();
-                return ret;
-            }
+        for (const s of data.symbols) {
+            children.push(new SymbolImpl(s, data.name));
         }
+
+        const leftSize = data.size - children.reduce((acc, child) => acc + child.getSize(), 0);
+        if (leftSize > 0) {
+            const name = `${data.name} Disasm`
+            children.push(new DisasmImpl(name, leftSize));
+        }
+
+        this.children = children;
     }
 
-    public getSize(): number {
-        return this.size;
-    }
-
-    public getType(): EntryType {
-        return this.type;
-    }
-
-    public getName(): string {
-        return this.name;
-    }
-
-    public getChildren(): Entry[] {
+    getChildren(): EntryChildren["package"] {
         return this.children;
     }
 
-    public getID(): string {
-        return this.uid.toString(16);
+    override getName(): string {
+        if (this.parent != null) {
+            return trimPrefix(this.data.name, this.parent + "/");
+        }
+
+        return this.data.name;
+    }
+
+    getSize(): number {
+        return this.data.size;
+    }
+
+    toString(): string {
+        const align = new aligner();
+        align.add("Package:", this.data.name)
+            .add("Type:", this.data.type)
+            .add("Size:", formatBytes(this.data.size));
+        return align.toString();
+    }
+
+    getType(): "package" {
+        return "package";
     }
 }
 
-function childrenFromPackage(pkg: Package): Entry[] {
-    const children: Entry[] = [];
-    for (const file of pkg.files) {
-        children.push(new Entry(file));
-    }
-    for (const subPackage of Object.values(pkg.subPackages)) {
-        children.push(new Entry(subPackage));
+export class DisasmImpl extends BaseImpl implements EntryLike<"disasm"> {
+    constructor(private readonly name: string, private readonly size: number) {
+        super();
     }
 
-    for (const s of pkg.symbols) {
-        children.push(new Entry(s));
+    getChildren(): EntryChildren["disasm"] {
+        return [];
     }
 
-    const leftSize = pkg.size - children.reduce((acc, child) => acc + child.getSize(), 0);
-    if (leftSize > 0) {
-        const name = `${pkg.name} Disasm`
-        children.push(new Entry(name, leftSize, "disasm"));
+    override getName(): string {
+        return this.name;
     }
 
-    return children;
-}
-
-function childrenFromResult(result: Result): Entry[] {
-    const children: Entry[] = [];
-
-    const sectionContainerChildren: Entry[] = []
-    for (const section of result.sections) {
-        sectionContainerChildren.push(new Entry(section));
-    }
-    const sectionContainerSize = sectionContainerChildren.reduce((acc, child) => acc + child.getSize(), 0);
-    const sectionContainer = new Entry("Unknown Sections Size", sectionContainerSize, "container", sectionContainerChildren);
-    sectionContainer.explain = "The unknown size of the sections in the binary."
-    children.push(sectionContainer);
-
-    const typedPackages: Record<string, Package[]> = {};
-    for (const pkg of Object.values(result.packages)) {
-        if (typedPackages[pkg.type] == null) {
-            typedPackages[pkg.type] = [];
-        }
-        typedPackages[pkg.type].push(pkg);
-    }
-    const typedPackagesChildren: Entry[] = []
-    for (const [type, packages] of Object.entries(typedPackages)) {
-        const packageContainerChildren: Entry[] = [];
-        for (const pkg of packages) {
-            packageContainerChildren.push(new Entry(pkg));
-        }
-        const packageContainerSize = packageContainerChildren.reduce((acc, child) => acc + child.getSize(), 0);
-        const packageContainer = new Entry(`${title(type)} Packages Size`, packageContainerSize, "container", packageContainerChildren);
-        packageContainer.explain = `The size of the ${type} packages in the binary.`
-        typedPackagesChildren.push(packageContainer);
-    }
-    const packageContainerSize = typedPackagesChildren.reduce((acc, child) => acc + child.getSize(), 0);
-    const packageContainer = new Entry("Packages Size", packageContainerSize, "container", typedPackagesChildren);
-    packageContainer.explain = "The size of the packages in the binary."
-    children.push(packageContainer);
-
-    const leftSize = result.size - children.reduce((acc, child) => acc + child.getSize(), 0);
-    if (leftSize > 0) {
-        const name = `Unknown`
-        children.push(new Entry(name, leftSize, "unknown"));
+    getSize(): number {
+        return this.size;
     }
 
-    return children;
-}
-
-class aligner {
-    private pre: string[] = [];
-    private post: string[] = [];
-
-    public add(pre: string, post: string): void {
-        this.pre.push(pre);
-        this.post.push(post);
-    }
-
-    public toString(): string {
-        // determine the maximum length of the pre-strings
-        const maxPreLength = max(this.pre, (d) => d.length) ?? 0;
-        let ret = "";
-        for (let i = 0; i < this.pre.length; i++) {
-            ret += this.pre[i].padEnd(maxPreLength + 1) + this.post[i] + "\n";
-        }
-        ret = ret.trimEnd();
+    toString(): string {
+        const align = new aligner();
+        align.add("Disasm:", this.name)
+            .add("Size:", formatBytes(this.size));
+        let ret = align.toString();
+        ret += "\n\n" +
+            "This size was not accurate." +
+            "The real size determined by disassembling can be larger.";
         return ret;
     }
+
+    getType(): "disasm" {
+        return "disasm";
+    }
+}
+
+export class SymbolImpl extends BaseImpl implements EntryLike<"symbol"> {
+    constructor(private readonly data: FileSymbol, private readonly parent: string) {
+        super();
+    }
+
+    getChildren(): EntryChildren["symbol"] {
+        return [];
+    }
+
+    override getName(): string {
+        return trimPrefix(this.data.name, this.parent + ".")
+    }
+
+    getSize(): number {
+        return this.data.size;
+    }
+
+    toString(): string {
+        const align = new aligner();
+        align.add("Symbol:", this.data.name)
+            .add("Size:", formatBytes(this.data.size))
+            .add("Address:", `0x${this.data.addr.toString(16)}`)
+            .add("Type:", this.data.type);
+        return align.toString();
+    }
+
+    getType(): "symbol" {
+        return "symbol";
+    }
+}
+
+export class ContainerImpl extends BaseImpl implements EntryLike<"container"> {
+    constructor(private readonly name: string,
+                private readonly shortName: string,
+                private readonly size: number,
+                private readonly children: EntryChildren["container"],
+                private readonly explain: string = "") {
+        super();
+    }
+
+    override getURLSafeName(): string {
+        return this.shortName;
+    }
+
+    getChildren(): EntryChildren["container"] {
+        return this.children;
+    }
+
+    override getName(): string {
+        return this.name;
+    }
+
+    getSize(): number {
+        return this.size;
+    }
+
+    toString(): string {
+        let ret = this.explain + "\n"
+        const align = new aligner();
+        align.add("Size:", formatBytes(this.size));
+        ret += "\n" + align.toString();
+        return ret;
+    }
+
+    getType(): "container" {
+        return "container";
+    }
+}
+
+export class UnknownImpl extends BaseImpl implements EntryLike<"unknown"> {
+    constructor(private readonly size: number) {
+        super();
+    }
+
+    getChildren(): EntryChildren["unknown"] {
+        return [];
+    }
+
+    override getName(): string {
+        return "Unknown";
+    }
+
+    getSize(): number {
+        return this.size;
+    }
+
+    toString(): string {
+        const align = new aligner();
+        align.add("Size:", formatBytes(this.size));
+        let ret = align.toString();
+        ret += "\n\n" +
+            "The unknown part in the binary.\n" +
+            "Can be ELF Header, Program Header, align offset...\n" +
+            "We just don't know.";
+        return ret;
+    }
+
+    getType(): "unknown" {
+        return "unknown";
+    }
+}
+
+export class ResultImpl extends BaseImpl implements EntryLike<"result"> {
+    private readonly children: EntryChildren["result"];
+
+    constructor(private readonly data: Result) {
+        super();
+
+        const children: EntryChildren["result"] = [];
+
+        const sectionContainerChildren: EntryLike<"section">[] = []
+        for (const section of data.sections) {
+            sectionContainerChildren.push(new SectionImpl(section));
+        }
+        const sectionContainerSize = sectionContainerChildren.reduce((acc, child) => acc + child.getSize(), 0);
+        const sectionContainer = new ContainerImpl(
+            "Unknown Sections Size",
+            "unk-sections",
+            sectionContainerSize,
+            sectionContainerChildren,
+            "The unknown size of the sections in the binary.");
+        children.push(sectionContainer);
+
+        const typedPackages: Record<string, Package[]> = {};
+        for (const pkg of Object.values(data.packages)) {
+            if (typedPackages[pkg.type] == null) {
+                typedPackages[pkg.type] = [];
+            }
+            typedPackages[pkg.type].push(pkg);
+        }
+        const typedPackagesChildren: EntryLike<"container">[] = [];
+        for (const [type, packages] of Object.entries(typedPackages)) {
+            const packageContainerChildren: EntryLike<"package" | "disasm">[] = [];
+            for (const pkg of packages) {
+                packageContainerChildren.push(new PackageImpl(pkg));
+            }
+            const packageContainerSize = packageContainerChildren.reduce((acc, child) => acc + child.getSize(), 0);
+            const packageContainer = new ContainerImpl(
+                `${title(type)} Packages Size`,
+                `${type}-packages`,
+                packageContainerSize,
+                packageContainerChildren,
+                `The size of the ${type} packages in the binary.`
+            )
+
+            typedPackagesChildren.push(packageContainer);
+        }
+        children.push(...typedPackagesChildren);
+
+        const leftSize = data.size - children.reduce((acc, child) => acc + child.getSize(), 0);
+        if (leftSize > 0) {
+            children.push(new UnknownImpl(leftSize));
+        }
+
+        this.children = children;
+    }
+
+    getChildren(): EntryChildren["result"] {
+        return this.children;
+    }
+
+    override getName(): string {
+        return this.data.name;
+    }
+
+    getSize(): number {
+        return this.data.size;
+    }
+
+    toString(): string {
+        const align = new aligner();
+        align.add("Result:", this.data.name)
+        if (this.data.analyzers) {
+            align.add("Analyzer", this.data.analyzers.join(", "))
+        }
+        align.add("Size:", formatBytes(this.data.size));
+        return align.toString();
+    }
+
+    getType(): "result" {
+        return "result";
+    }
+}
+
+export type Entry = EntryLike<EntryType>;
+
+export function createEntry(data: Result): Entry {
+    return new ResultImpl(data);
 }

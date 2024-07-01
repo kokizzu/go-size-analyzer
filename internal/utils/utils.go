@@ -3,22 +3,14 @@ package utils
 import (
 	"debug/pe"
 	"fmt"
+	"iter"
 	"log/slog"
-	"os"
 	"strconv"
 	"strings"
+	"unique"
 
-	"go4.org/intern"
 	"golang.org/x/net/publicsuffix"
 )
-
-func GetFileSize(file *os.File) uint64 {
-	fileInfo, err := file.Stat()
-	if err != nil {
-		panic(err)
-	}
-	return uint64(fileInfo.Size())
-}
 
 func GetImageBase(file *pe.File) uint64 {
 	switch hdr := file.OptionalHeader.(type) {
@@ -32,7 +24,7 @@ func GetImageBase(file *pe.File) uint64 {
 }
 
 func Deduplicate(s string) string {
-	return intern.GetByString(s).Get().(string)
+	return unique.Make(s).Value()
 }
 
 // UglyGuess an ugly hack for a known issue about golang compiler
@@ -124,4 +116,20 @@ func PrefixToPath(s string) (string, error) {
 		i += 3
 	}
 	return string(p), nil
+}
+
+func Must(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+func Collect[K comparable](seq iter.Seq[K]) []K {
+	m := make([]K, 0)
+
+	for k := range seq {
+		m = append(m, k)
+	}
+
+	return m
 }

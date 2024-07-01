@@ -1,0 +1,83 @@
+name: Build UI
+
+on:
+  workflow_call:
+    inputs:
+      release:
+        description: 'Make a release for the UI'
+        type: boolean
+        required: true
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-webui:
+    name: Build Treemap WebUI
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4.0.2
+        with:
+          node-version: '21'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # v4.0.0
+        with:
+          standalone: true
+          package_json_file: 'ui/package.json'
+          version: latest
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+        name: Setup pnpm cache
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        working-directory: ./ui
+        run: pnpm install
+
+      - name: Build
+        working-directory: ./ui
+        run: pnpm run build:ui
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          PULL_REQUEST_COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
+
+      - name: Release
+        if: ${{ inputs.release }}
+        uses: ncipollo/release-action@2c591bcc8ecdcd2db72b97d6147f871fcd833ba5 # v1.14.0
+        with:
+          artifactErrorsFailBuild: true
+          allowUpdates: true
+          artifactContentType: 'text/html'
+          artifacts: 'ui/dist/webui/index.html'
+          tag: ui-v1
+          commit: master
+          prerelease: true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+        with:
+          name: ui
+          path: 'ui/dist/webui/index.html'
+
+
+      

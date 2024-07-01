@@ -1,9 +1,9 @@
+//go:build !js && !wasm
+
 package tui
 
 import (
 	"bytes"
-	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -12,38 +12,15 @@ import (
 	"github.com/charmbracelet/x/exp/teatest"
 	"github.com/muesli/termenv"
 
-	"github.com/Zxilly/go-size-analyzer/internal"
-	"github.com/Zxilly/go-size-analyzer/internal/result"
+	"github.com/Zxilly/go-size-analyzer/internal/test"
 )
 
 func init() {
 	lipgloss.SetColorProfile(termenv.Ascii)
 }
 
-func GetProjectRoot() string {
-	_, filename, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(filename), "..", "..")
-}
-
-func GetTestResult(t *testing.T) *result.Result {
-	t.Helper()
-
-	// test against bin-linux-1.21-amd64
-	path := filepath.Join(GetProjectRoot(), "scripts", "bins", "bin-linux-1.21-amd64")
-	path, err := filepath.Abs(path)
-	if err != nil {
-		t.Fatalf("failed to get absolute path of %s: %v", path, err)
-	}
-
-	r, err := internal.Analyze(path, internal.Options{})
-	if err != nil {
-		t.Fatalf("failed to analyze %s: %v", path, err)
-	}
-	return r
-}
-
 func TestFullOutput(t *testing.T) {
-	m := newMainModel(GetTestResult(t))
+	m := newMainModel(test.GetTestResult(t), 300, 100)
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(300, 100))
 
 	teatest.WaitFor(t, tm.Output(), func(bts []byte) bool {
