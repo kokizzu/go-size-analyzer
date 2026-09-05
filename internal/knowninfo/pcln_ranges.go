@@ -12,19 +12,21 @@ import (
 // pclnSpans follows cmd/link/internal/ld/pcln.go and runtime._func. Offsets
 // remain relative to the original pclntab so shared PC programs stay shared.
 type pclnSpans struct {
+	funcData                                           func(uint64, uint64, uint64, int64) []entity.AddrPos
 	stackMap                                           func(uint64, uint64) (entity.AddrPos, bool)
 	data                                               []byte
 	order                                              binary.ByteOrder
 	base, ptr, field, header, names, pcs, funcs, count uint64
 	version                                            int
 	pcSizes                                            map[uint32]uint64
+	pcMax                                              map[uint32]int64
 }
 
 func newPclnSpans(data []byte, base uint64) (*pclnSpans, error) {
 	if len(data) < 16 {
 		return nil, errors.New("short pclntab header")
 	}
-	p := &pclnSpans{data: data, base: base, ptr: uint64(data[7]), order: binary.LittleEndian, pcSizes: map[uint32]uint64{}}
+	p := &pclnSpans{data: data, base: base, ptr: uint64(data[7]), order: binary.LittleEndian, pcSizes: map[uint32]uint64{}, pcMax: map[uint32]int64{}}
 	version := func(m uint32) int {
 		switch m {
 		case 0xfffffffb:
@@ -123,19 +125,33 @@ func (p *pclnSpans) pcSize(off uint32) (uint64, error) {
 		return 0, err
 	}
 	position := start
+	limit := uint64(len(p.data))
+	if p.version >= 116 {
+		if p.funcs > limit || start >= p.funcs {
+			return 0, errors.New("PC program outside pctab")
+		}
+		limit = p.funcs
+	}
+	current, maximum := int64(-1), int64(-1)
 	first := true
-	for position < uint64(len(p.data)) {
-		value, n := binary.Uvarint(p.data[position:])
-		if n <= 0 {
+	for position < limit {
+		value, n := binary.Uvarint(p.data[position:limit])
+		if n <= 0 || value > uint64(^uint32(0)) {
 			return 0, errors.New("invalid PC value varint")
 		}
 		position += uint64(n)
 		if value == 0 && !first {
 			size := position - start
 			p.pcSizes[off] = size
+			p.pcMax[off] = maximum
 			return size, nil
 		}
-		_, n = binary.Uvarint(p.data[position:])
+		current += int64(value>>1) ^ -int64(value&1)
+		if current < -1<<31 || current > 1<<31-1 {
+			return 0, errors.New("PC value overflow")
+		}
+		maximum = max(maximum, current)
+		_, n = binary.Uvarint(p.data[position:limit])
 		if n <= 0 {
 			return 0, errors.New("invalid PC delta varint")
 		}
@@ -257,6 +273,32 @@ func (p *pclnSpans) function(i uint64) ([]entity.AddrPos, entity.PclnSymbolSize,
 			}
 		}
 	}
+	if p.funcData != nil && p.version >= 120 {
+		for index := uint64(2); index < nfd; index++ {
+			cell := off + arrayEnd + index*dataWidth
+			value := uint64(p.order.Uint32(p.data[cell:]))
+			maximum := int64(-1)
+			if index == 3 && npc > 2 {
+				offset := p.order.Uint32(p.data[off+headSize+2*4:])
+				if offset != 0 {
+					maximum = p.pcMax[offset]
+				}
+			}
+			ranges := p.funcData(index, value, p.base+cell, maximum)
+			if len(ranges) == 0 {
+				continue
+			}
+			spans = append(spans, ranges...)
+			if sizes.AuxData == nil {
+				sizes.AuxData = map[string]uint64{}
+			}
+			var parts []entity.FileRange
+			for _, r := range ranges {
+				parts = append(parts, entity.FileRange{Offset: r.Addr, Size: r.Size})
+			}
+			sizes.AuxData[funcDataKind(index)] = entity.UnionFileSize(parts)
+		}
+	}
 	return spans, sizes, nil
 }
 
@@ -279,6 +321,8 @@ func (k *KnownInfo) loadExactPclnRanges() error {
 	if err != nil {
 		return err
 	}
+	aux := &functionDataReader{p: p, read: k.Wrapper.ReadAddr, valid: k.Sects.IsData, limit: k.Size, base: md.GoFuncValue(), cache: map[functionDataKey][]entity.AddrPos{}}
+	p.funcData = aux.ranges
 	mapSizes := map[uint64]uint64{}
 	p.stackMap = func(value, cell uint64) (entity.AddrPos, bool) {
 		var addr uint64

@@ -4,15 +4,16 @@ import "github.com/ZxillyFork/gosym"
 
 // PclnSymbolSize represents a pcln symbol sizes
 type PclnSymbolSize struct {
-	GCMaps   uint64         `json:"gc_maps,omitzero"`
-	Ftab     uint64         `json:"ftab,omitzero"`
-	Name     uint64         `json:"name"`     // the function name size
-	PCFile   uint64         `json:"pcfile"`   // the file name tab size
-	PCSP     uint64         `json:"pcsp"`     // the pc to stack pointer table size
-	PCLN     uint64         `json:"pcln"`     // the pc to line number table size
-	Header   uint64         `json:"header"`   // the header size
-	FuncData uint64         `json:"funcdata"` // the funcdata size
-	PCData   map[string]int `json:"pcdata"`   // the pcdata size
+	AuxData  map[string]uint64 `json:"aux_data,omitempty"`
+	GCMaps   uint64            `json:"gc_maps,omitzero"`
+	Ftab     uint64            `json:"ftab,omitzero"`
+	Name     uint64            `json:"name"`     // the function name size
+	PCFile   uint64            `json:"pcfile"`   // the file name tab size
+	PCSP     uint64            `json:"pcsp"`     // the pc to stack pointer table size
+	PCLN     uint64            `json:"pcln"`     // the pc to line number table size
+	Header   uint64            `json:"header"`   // the header size
+	FuncData uint64            `json:"funcdata"` // the funcdata size
+	PCData   map[string]int    `json:"pcdata"`   // the pcdata size
 }
 
 func (p *PclnSymbolSize) Size() uint64 {
@@ -25,6 +26,9 @@ func (p *PclnSymbolSize) Size() uint64 {
 	size += p.PCLN
 	size += p.Header
 	size += p.FuncData
+	for _, n := range p.AuxData {
+		size += n
+	}
 	for _, v := range p.PCData {
 		size += uint64(v)
 	}
