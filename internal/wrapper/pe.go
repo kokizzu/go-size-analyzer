@@ -149,12 +149,13 @@ func (p *PeWrapper) LoadSections() *entity.Store {
 }
 
 func (p *PeWrapper) ReadAddr(addr, size uint64) ([]byte, error) {
-	if addr < p.imageBase {
+	if addr < p.imageBase || size > ^uint64(0)-addr {
 		return nil, ErrAddrNotFound
 	}
 	addr -= p.imageBase
 	for _, sect := range p.file.Sections {
-		if uint64(sect.VirtualAddress) <= addr && addr+size <= uint64(sect.VirtualAddress+sect.Size) {
+		start := uint64(sect.VirtualAddress)
+		if start <= addr && addr-start <= uint64(sect.Size) && size <= uint64(sect.Size)-(addr-start) {
 			data := make([]byte, size)
 			if _, err := sect.ReadAt(data, int64(addr-uint64(sect.VirtualAddress))); err != nil {
 				return nil, err

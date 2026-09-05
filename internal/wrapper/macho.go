@@ -361,6 +361,9 @@ func machoSectionShouldIgnore(sect *types.Section) bool {
 }
 
 func (m *MachoWrapper) ReadAddr(addr, size uint64) ([]byte, error) {
+	if size > ^uint64(0)-addr {
+		return nil, ErrAddrNotFound
+	}
 	// DWARF/on-disk addresses use unslid VM addresses; do not apply dyld slide here.
 	// Quick reject for memory-only (zerofill) ranges using precomputed intervals.
 	if m.isMemOnly(addr, size) {

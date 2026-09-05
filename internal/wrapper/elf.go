@@ -222,6 +222,9 @@ func (e *ElfWrapper) LoadSections() *entity.Store {
 }
 
 func (e *ElfWrapper) ReadAddr(addr, size uint64) ([]byte, error) {
+	if size > ^uint64(0)-addr {
+		return nil, ErrAddrNotFound
+	}
 	if size == 0 {
 		return nil, nil
 	}
@@ -230,7 +233,7 @@ func (e *ElfWrapper) ReadAddr(addr, size uint64) ([]byte, error) {
 		if prog.Type != elf.PT_LOAD {
 			continue
 		}
-		if prog.Vaddr <= addr && addr+size-1 <= prog.Vaddr+prog.Filesz-1 {
+		if prog.Vaddr <= addr && addr-prog.Vaddr <= prog.Filesz && size <= prog.Filesz-(addr-prog.Vaddr) {
 			data := make([]byte, size)
 			if _, err := prog.ReadAt(data, int64(addr-prog.Vaddr)); err != nil {
 				return nil, err
