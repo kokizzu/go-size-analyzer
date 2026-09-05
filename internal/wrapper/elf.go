@@ -310,6 +310,15 @@ func (e *ElfWrapper) GoArch() string {
 		return "ppc64"
 	case elf.EM_S390:
 		return "s390x"
+	case elf.EM_MIPS:
+		arch := "mips"
+		if e.file.Class == elf.ELFCLASS64 {
+			arch = "mips64"
+		}
+		if e.file.ByteOrder == binary.LittleEndian {
+			arch += "le"
+		}
+		return arch
 	default:
 		return ""
 	}

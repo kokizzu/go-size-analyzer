@@ -16,14 +16,14 @@ import (
 func ptrSizeAndOrder(goarch string) (int, binary.ByteOrder) {
 	ptrSize := 8
 	switch goarch {
-	case "386", "arm", "armbe", "mips", "mipsle", "mips64p32":
+	case "386", "arm", "armbe", "mips", "mipsle", "mips64p32", "mips64p32le":
 		ptrSize = 4
 	default:
 	}
 
 	var order binary.ByteOrder = binary.LittleEndian
 	switch goarch {
-	case "s390x", "ppc64":
+	case "s390x", "ppc64", "armbe", "mips", "mips64", "mips64p32":
 		order = binary.BigEndian
 	default:
 	}

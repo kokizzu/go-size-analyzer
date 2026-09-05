@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"slices"
 
 	"github.com/ZxillyFork/gore"
@@ -224,19 +225,21 @@ func auxKindTag(k gore.TypeAuxKind) string {
 }
 
 // itabStructSize returns the on-disk size of an itab given its interface type.
-// Layout (runtime/iface.go): inter(ptr) + _type(ptr) + hash(4) + pad(4) +
-// fun[n](ptr*n). Go always emits at least one fun slot even when n==0, so we
-// floor at 1. Returns 0 when interType is nil so the caller can fall back.
+// The function slots follow two pointers and a uint32 hash, aligned to the
+// pointer size. Every table has at least one slot. An unknown interface
+// returns zero so the caller can use the minimum record size.
 func itabStructSize(interType *gore.GoType, ptrSz uint64) uint64 {
-	if interType == nil {
+	if interType == nil || interType.Kind != reflect.Interface {
 		return 0
 	}
 	n := uint64(len(interType.Methods))
 	if n == 0 {
 		n = 1
 	}
-	return 2*ptrSz + 8 + n*ptrSz
+	return itabHeaderSize(ptrSz) + n*ptrSz
 }
+
+func itabHeaderSize(ptrSz uint64) uint64 { return (2*ptrSz + 4 + ptrSz - 1) &^ (ptrSz - 1) }
 
 // readPtr reads a pointer-sized value from data at the given byte offset.
 func readPtr(data []byte, off uint64, ptrSize int, order binary.ByteOrder) uint64 {
@@ -246,57 +249,40 @@ func readPtr(data []byte, off uint64, ptrSize int, order binary.ByteOrder) uint6
 	return order.Uint64(data[off : off+8])
 }
 
-// analyzeItabs reads the itablinks pointer array from moduledata and attributes
-// each itab struct to the package of its concrete type.
+// analyzeItabs attributes interface tables from either Go layout to their
+// concrete type's package. The dependency resolves the table addresses.
 func (k *KnownInfo) analyzeItabs(md gore.Moduledata, typeAddrCache map[uint64]*gore.GoType) error {
-	itabSection := md.ITabLinks()
-	if itabSection.Length == 0 {
-		return nil
+	itabAddrs, err := md.ITabLinksData()
+	if err != nil {
+		return fmt.Errorf("reading interface table addresses: %w", err)
 	}
-
 	ptrSize, order := ptrSizeAndOrder(k.Wrapper.GoArch())
 	ptrSz := uint64(ptrSize)
-
-	// ITabLinks Length is element count (Go slice len), not byte count.
-	numItabs := itabSection.Length
-
-	// Read the pointer array in one call.
-	ptrData, err := k.Wrapper.ReadAddr(itabSection.Address, numItabs*ptrSz)
-	if err != nil {
-		return fmt.Errorf("reading itablinks pointer array: %w", err)
-	}
-
-	// Collect all non-zero itab addresses and find the contiguous region.
-	// On PIE binaries, each pointer in the array is a fixup descriptor that
-	// must be resolved to the actual virtual address.
-	itabAddrs := make([]uint64, 0, numItabs)
-	for i := range numItabs {
-		fileAddr := itabSection.Address + i*ptrSz
-		raw := readPtr(ptrData, i*ptrSz, ptrSize, order)
-		addr := md.ResolvePointer(raw, fileAddr)
-		if addr != 0 {
-			itabAddrs = append(itabAddrs, addr)
-		}
-	}
+	numItabs := len(itabAddrs)
+	itabAddrs = slices.DeleteFunc(itabAddrs, func(addr uint64) bool { return addr == 0 })
 
 	if len(itabAddrs) == 0 {
 		return nil
 	}
 
 	slices.Sort(itabAddrs)
+	itabAddrs = slices.Compact(itabAddrs)
 
 	// Bulk-read only the inter + _type header pair; the per-itab fun[] tail
 	// has variable length so we size each one later via itabStructSize.
 	headerSize := 2 * ptrSz
 	regionStart := itabAddrs[0]
 	regionEnd := itabAddrs[len(itabAddrs)-1] + headerSize
-	regionData, err := k.Wrapper.ReadAddr(regionStart, regionEnd-regionStart)
+	var regionData []byte
+	if regionEnd >= regionStart && regionEnd-regionStart <= k.Size {
+		regionData, err = k.Wrapper.ReadAddr(regionStart, regionEnd-regionStart)
+	}
 	if err != nil {
 		slog.Warn("Failed to bulk-read itab region, falling back to per-itab reads", "err", err)
 		regionData = nil
 	}
 
-	minItabSize := 2*ptrSz + 8 + ptrSz
+	minItabSize := itabHeaderSize(ptrSz) + ptrSz
 
 	readItabPtr := func(itabAddr, fieldOff uint64) (uint64, bool) {
 		fieldFileAddr := itabAddr + fieldOff
@@ -306,7 +292,7 @@ func (k *KnownInfo) analyzeItabs(md gore.Moduledata, typeAddrCache map[uint64]*g
 			raw = readPtr(regionData, localOff, ptrSize, order)
 		} else {
 			buf, err := k.Wrapper.ReadAddr(fieldFileAddr, ptrSz)
-			if err != nil {
+			if err != nil || uint64(len(buf)) != ptrSz {
 				return 0, false
 			}
 			raw = readPtr(buf, 0, ptrSize, order)
@@ -316,7 +302,7 @@ func (k *KnownInfo) analyzeItabs(md gore.Moduledata, typeAddrCache map[uint64]*g
 
 	var itabsAttributed int
 
-	for idx, itabAddr := range itabAddrs {
+	for _, itabAddr := range itabAddrs {
 		interAddr, okInter := readItabPtr(itabAddr, 0)
 		typeAddr, okType := readItabPtr(itabAddr, ptrSz)
 		if !okType {
@@ -331,13 +317,13 @@ func (k *KnownInfo) analyzeItabs(md gore.Moduledata, typeAddrCache map[uint64]*g
 		}
 
 		itabSize := itabStructSize(interType, ptrSz)
-		if itabSize == 0 {
-			// Unknown interface: gap-to-next, last entry capped at minItabSize.
-			if idx+1 < len(itabAddrs) {
-				itabSize = itabAddrs[idx+1] - itabAddr
-			} else {
-				itabSize = minItabSize
-			}
+		firstFunc, ok := readItabPtr(itabAddr, itabHeaderSize(ptrSz))
+		if !ok {
+			continue
+		}
+		if itabSize == 0 || firstFunc == 0 {
+			// Only the fixed header and first function slot are certain.
+			itabSize = minItabSize
 		}
 
 		var ownerPath string
