@@ -42,6 +42,9 @@ func NewStore() *Store {
 // getStart returns the range start for an element; contains checks the full containment.
 // Returns the index of the matching element, or -1 if not found.
 func searchSorted[T any](slice []T, addr uint64, getStart func(T) uint64, contains func(T, uint64, uint64) bool, size uint64) int {
+	if size > ^uint64(0)-addr {
+		return -1
+	}
 	idx, _ := slices.BinarySearchFunc(slice, addr, func(elem T, target uint64) int {
 		return cmp.Compare(getStart(elem), target)
 	})

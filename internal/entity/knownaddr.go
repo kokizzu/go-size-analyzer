@@ -12,6 +12,7 @@ type KnownAddr struct {
 
 	SymbolAddrSpace AddrSpace
 	SymbolCoverage  AddrCoverage
+	symbolPrefix    []int // index of the furthest-reaching symbol in each prefix
 
 	sect *Store
 }
@@ -124,21 +125,29 @@ func (f *KnownAddr) BuildSymbolCoverage() {
 	// SymbolCovHas binary-searches; the slice must be sorted.
 	f.SymbolCoverage = f.SymbolAddrSpace.ToDirtyCoverage()
 	slices.SortFunc(f.SymbolCoverage, compareCoveragePart)
+	f.symbolPrefix = make([]int, len(f.SymbolCoverage))
+	longest := 0
+	for i, part := range f.SymbolCoverage {
+		if previous := f.SymbolCoverage[longest].Pos; part.Pos.Addr+part.Pos.Size > previous.Addr+previous.Size {
+			longest = i
+		}
+		f.symbolPrefix[i] = longest
+	}
 }
 
 func (f *KnownAddr) SymbolCovHas(entry uint64, size uint64) (AddrType, bool) {
-	if len(f.SymbolCoverage) == 0 {
+	if len(f.SymbolCoverage) == 0 || size == 0 || size > ^uint64(0)-entry {
 		return "", false
 	}
 
 	end := entry + size
-	// Symbols are non-overlapping and sorted, so only the immediate predecessor
-	// of the first entry with Addr >= end can overlap [entry, end).
+	// Aliases can sit inside larger symbols. The furthest-reaching prefix
+	// handles nesting without scanning backwards through every smaller alias.
 	idx, _ := slices.BinarySearchFunc(f.SymbolCoverage, end, func(cur *CoveragePart, target uint64) int {
 		return cmp.Compare(cur.Pos.Addr, target)
 	})
 	if idx > 0 {
-		prev := f.SymbolCoverage[idx-1]
+		prev := f.SymbolCoverage[f.symbolPrefix[idx-1]]
 		if prev.Pos.Addr+prev.Pos.Size > entry {
 			return prev.Pos.Type, true
 		}
@@ -148,6 +157,9 @@ func (f *KnownAddr) SymbolCovHas(entry uint64, size uint64) (AddrType, bool) {
 }
 
 func (f *KnownAddr) InsertDisasm(entry uint64, size uint64, fn *Function, sources ...AddrSourceType) {
+	if size == 0 || size > ^uint64(0)-entry {
+		return
+	}
 	cur := Addr{
 		AddrPos: &AddrPos{
 			Addr: entry,
