@@ -254,10 +254,10 @@ func (m *MachoWrapper) LoadSymbols(marker func(name string, addr uint64, size ui
 		}
 		sect := m.file.Sections[s.Sect-1]
 
-		switch sect.Seg {
-		case "__DATA_CONST", "__DATA":
+		switch machoSectionType(sect) {
+		case entity.SectionContentData:
 			typ = entity.AddrTypeData
-		case "__TEXT":
+		case entity.SectionContentText:
 			typ = entity.AddrTypeText
 		default:
 		}
@@ -285,6 +285,8 @@ func machoSectionType(s *types.Section) entity.SectionContentType {
 	switch {
 	case s.Name == "__text":
 		return entity.SectionContentText
+	case strings.HasPrefix(s.Name, "__go_") || s.Name == "__gopclntab" || s.Name == "__gosymtab" || s.Name == "__const" || s.Name == "__cstring" || s.Name == "__typelink" || s.Name == "__itablink":
+		return entity.SectionContentData
 	case strings.HasSuffix(s.Name, "bss") || strings.Contains(s.Name, "data"):
 		return entity.SectionContentData
 	default:
@@ -348,16 +350,9 @@ func machoSectionShouldIgnore(sect *types.Section) bool {
 
 	const sZeroFill = 0x1
 	const sGBZeroFill = 0xc
-
-	if sect.Flags&sZeroFill != 0 {
-		return true
-	}
-
-	if sect.Flags&sGBZeroFill != 0 {
-		return true
-	}
-
-	return false
+	const sThreadLocalZeroFill = 0x12
+	sectionType := sect.Flags & 0xff
+	return sectionType == sZeroFill || sectionType == sGBZeroFill || sectionType == sThreadLocalZeroFill
 }
 
 func (m *MachoWrapper) ReadAddr(addr, size uint64) ([]byte, error) {
